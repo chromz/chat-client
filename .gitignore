@@ -1,6 +1,7 @@
 # Prerequisites
 *.d
 
+chat
 # Object files
 *.o
 *.ko
