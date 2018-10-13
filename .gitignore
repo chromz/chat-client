@@ -1,8 +1,6 @@
 # Prerequisites
 *.d
 
-build/*
-
 chat
 # Object files
 *.o
