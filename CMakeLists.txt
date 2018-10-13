@@ -6,4 +6,4 @@ set (Chat_VERSION_MINOR 0)
 
 
 include_directories("${PROJECT_BINARY_DIR}")
-add_subdirectory(src build)
+add_subdirectory(src bin)
