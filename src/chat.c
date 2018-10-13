@@ -1,10 +1,37 @@
 #include <gtk/gtk.h>
+#include <json.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
+struct User {
+	char *id;
+	char *name;
+	char *status;
+};
+
+char *dummy_users = "{"
+	"	\"action\": \"LIST_USER\","
+	"	\"users\": ["
+	"		{"
+	"			\"id\": \"ASDzxfaFA=asd?\","
+	"			\"name\": \"JM\","
+	"			\"status\": \"active\""
+	"		},"
+	"		{"
+	"			\"id\": \"ASDzxfaFA=asd?\","
+	"			\"name\": \"JR\","
+	"			\"status\": \"active\""
+	"		},"
+	"		{"
+	"			\"id\": \"ASDzxfaFA=asd?\","
+	"			\"name\": \"NM\","
+	"			\"status\": \"active\""
+	"		}"
+	"	]"
+	"}";
 
 static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer user_data)
 {
@@ -13,6 +40,9 @@ static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer use
 
 static GtkWidget** fetch_users()
 {
+	struct json_object *server_resp;
+	server_resp = json_tokener_parse(dummy_users);
+	g_print("--\n%s\n", json_object_to_json_string(server_resp));
 	int usramnt = 10;
 	GtkWidget **users = (GtkWidget **) malloc((usramnt + 1) * sizeof(GtkWidget*));
 	for (int i = 0; i < 10; ++i) {
