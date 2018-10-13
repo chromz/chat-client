@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 3.0)
+cmake_minimum_required (VERSION 2.6)
 project (Chat)
 
 set (Chat_VERSION_MAJOR 1)
