@@ -10,5 +10,5 @@ file(COPY assets DESTINATION ${CMAKE_BINARY_DIR}/bin)
 
 
 add_executable (Chat ${files})
-set_property(TARGET Chat PROPERTY C_STANDARD 99)
+use_c99()
 target_link_libraries (Chat ${GTK3_LIBRARIES})
