@@ -24,6 +24,7 @@ static GtkWidget *msg_input;
 static GdkPixbuf *uvg_logo;
 
 // Login components
+static GtkWidget *spinner;
 static GtkWidget *welcome_box;
 static GtkWidget *welcome_image;
 static GtkWidget *login_box;
@@ -69,7 +70,7 @@ static void free_user_list(void)
 
 static void connect_to_server(GtkButton *button, gpointer user_data)
 {
-
+	gtk_spinner_start(GTK_SPINNER(spinner));
 }
 
 static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer user_data)
@@ -149,6 +150,7 @@ static void activate(GtkApplication *app, gpointer user_data)
 	name_in = gtk_entry_new();
 	ip_in = gtk_entry_new();
 	port_in = gtk_entry_new();
+	spinner = gtk_spinner_new();
 	cnct_btn = gtk_button_new_with_label("Connect");
 
 	gtk_box_pack_start(GTK_BOX(welcome_box), welcome_image, TRUE, TRUE, 20);
@@ -160,6 +162,7 @@ static void activate(GtkApplication *app, gpointer user_data)
 	gtk_box_pack_start(GTK_BOX(login_box), port_label, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(login_box), port_in, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(login_box), cnct_btn, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(login_box), spinner, FALSE, FALSE, 0);
 
 	gtk_box_pack_end(GTK_BOX(welcome_box), login_box, FALSE, FALSE, 0);
 	gtk_widget_set_valign(welcome_box, GTK_ALIGN_CENTER);
