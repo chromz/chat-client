@@ -16,7 +16,6 @@ static GtkWidget *header_bar;
 static GtkWidget *paned;
 static GtkWidget *user_list;
 static GtkWidget *chat_stack;
-static GtkWidget *welcome_image;
 static GtkWidget *chat_box;
 static GtkWidget *chat_text;
 static GtkWidget *form_box;
@@ -24,7 +23,19 @@ static GtkWidget *send_msg_button;
 static GtkWidget *msg_input;
 static GdkPixbuf *uvg_logo;
 
-static gboolean is_in_chat = FALSE;
+// Login components
+static GtkWidget *welcome_box;
+static GtkWidget *welcome_image;
+static GtkWidget *login_box;
+static GtkWidget *name_label;
+static GtkWidget *ip_label;
+static GtkWidget *port_label;
+static GtkWidget *name_in;
+static GtkWidget *ip_in;
+static GtkWidget *port_in;
+static GtkWidget *cnct_btn;
+
+static gboolean logged_in = FALSE;
 
 static struct user_st **user_st_list = NULL;
 static char *dummy_users = "{"
@@ -56,12 +67,17 @@ static void free_user_list(void)
 	free(user_st_list);
 }
 
+static void connect_to_server(GtkButton *button, gpointer user_data)
+{
+
+}
+
 static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer user_data)
 {
-	if (!is_in_chat) {
+	if (!logged_in) {
 		// Show chat interface
 		gtk_stack_set_visible_child_name(GTK_STACK(chat_stack), "chat-box");
-		is_in_chat = TRUE;
+		logged_in = TRUE;
 	}
 	gint index = gtk_list_box_row_get_index(row);
 	struct user_st *usr = user_st_list[index];
@@ -124,7 +140,31 @@ static void activate(GtkApplication *app, gpointer user_data)
 	}
 	welcome_image = gtk_image_new_from_pixbuf(uvg_logo);
 	chat_stack = gtk_stack_new();
-	gtk_stack_add_named(GTK_STACK(chat_stack), welcome_image, "welcome");
+	// Login View
+	welcome_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	login_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	name_label = gtk_label_new("Username:");
+	ip_label = gtk_label_new("Server Ip:");
+	port_label = gtk_label_new("Port:");
+	name_in = gtk_entry_new();
+	ip_in = gtk_entry_new();
+	port_in = gtk_entry_new();
+	cnct_btn = gtk_button_new_with_label("Connect");
+
+	gtk_box_pack_start(GTK_BOX(welcome_box), welcome_image, TRUE, TRUE, 20);
+
+	gtk_box_pack_start(GTK_BOX(login_box), name_label, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(login_box), name_in, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(login_box), ip_label, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(login_box), ip_in, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(login_box), port_label, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(login_box), port_in, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(login_box), cnct_btn, FALSE, FALSE, 0);
+
+	gtk_box_pack_end(GTK_BOX(welcome_box), login_box, FALSE, FALSE, 0);
+	gtk_widget_set_valign(welcome_box, GTK_ALIGN_CENTER);
+	gtk_widget_set_halign(welcome_box, GTK_ALIGN_CENTER);
+	gtk_stack_add_named(GTK_STACK(chat_stack), welcome_box, "welcome");
 
 	// Chat View
 	chat_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10); 
@@ -146,13 +186,15 @@ static void activate(GtkApplication *app, gpointer user_data)
 	user_list = gtk_list_box_new();
 
 	// Create dummy users
-	GtkWidget **users = fetch_users();
+	/* GtkWidget **users = fetch_users(); */
 
 	// Add dummy users
-	for (int i = 0; users[i]; ++i) {
-		gtk_container_add(GTK_CONTAINER(user_list), users[i]);
-	}
-	free(users);
+	/* for (int i = 0; users[i]; ++i) { */
+	/* 	gtk_container_add(GTK_CONTAINER(user_list), users[i]); */
+	/* } */
+	/* free(users); */
+
+	g_signal_connect(cnct_btn, "clicked", G_CALLBACK(connect_to_server), NULL);
 	g_signal_connect(user_list, "row-activated", G_CALLBACK(on_user_item_click), NULL);
 
 	// Setup chat interface
@@ -175,6 +217,6 @@ int main(int argc, char *argv[])
 	g_signal_connect(app, "activate", G_CALLBACK (activate), NULL);
 	status = g_application_run(G_APPLICATION (app), argc, argv);
 	g_object_unref(app);
-	free_user_list();
+	/* free_user_list(); */
 	return status;
 }
