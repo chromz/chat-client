@@ -6,13 +6,14 @@
 #include <string.h>
 #include <unistd.h>
 
-struct User {
-	char *id;
-	char *name;
-	char *status;
+struct user_st {
+	const char *id;
+	const char *name;
+	const char *status;
 };
 
-char *dummy_users = "{"
+static struct user_st **user_st_list = NULL;
+static char *dummy_users = "{"
 	"	\"action\": \"LIST_USER\","
 	"	\"users\": ["
 	"		{"
@@ -33,26 +34,49 @@ char *dummy_users = "{"
 	"	]"
 	"}";
 
+static void free_user_list(void)
+{
+	for (int i = 0; user_st_list[i]; ++i) {
+		free(user_st_list[i]);
+	}
+	free(user_st_list);
+}
+
 static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer user_data)
 {
 	g_print("Holona\n");
 }
 
-static GtkWidget** fetch_users()
+static GtkWidget** fetch_users(void)
 {
-	struct json_object *server_resp;
+	int usramnt = 0;
+	GtkWidget **users_labels;
+	struct json_object *server_resp, *user_list_json, *user_obj;
+	struct json_object *user_id_j, *user_name_j, *user_status_j;
 	server_resp = json_tokener_parse(dummy_users);
-	g_print("--\n%s\n", json_object_to_json_string(server_resp));
-	int usramnt = 10;
-	GtkWidget **users = (GtkWidget **) malloc((usramnt + 1) * sizeof(GtkWidget*));
-	for (int i = 0; i < 10; ++i) {
-		char usr[20];
-		sprintf(usr, "%s %d", "User", i);
-		users[i] = gtk_label_new(usr);
+	if (!json_object_object_get_ex(server_resp, "users", &user_list_json)) {
+		return NULL;
 	}
-	users[usramnt] = NULL;
 
-	return users;
+	usramnt = json_object_array_length(user_list_json);
+	users_labels = malloc((usramnt + 1) * sizeof(GtkWidget*));
+	user_st_list = malloc((usramnt + 1) * sizeof(struct user_st *));
+	for (int i = 0; i < usramnt; ++i) {
+		user_obj = json_object_array_get_idx(user_list_json, i);
+		json_object_object_get_ex(user_obj, "id", &user_id_j);
+		json_object_object_get_ex(user_obj, "name", &user_name_j);
+		json_object_object_get_ex(user_obj, "status", &user_status_j);
+		user_st_list[i] = malloc(sizeof(struct user_st));
+		user_st_list[i]->id = json_object_get_string(user_id_j);
+		user_st_list[i]->name = json_object_get_string(user_name_j);
+		user_st_list[i]->status = json_object_get_string(user_status_j);
+		g_print("USER: %s\n", user_st_list[i]->name);
+		users_labels[i] = gtk_label_new(user_st_list[i]->name);
+	}
+	users_labels[usramnt] = NULL;
+	user_st_list[usramnt] = NULL;
+
+	return users_labels;
 }
 
 // Function to initialize chat gui
@@ -100,6 +124,7 @@ static void activate(GtkApplication *app, gpointer user_data)
 	for (int i = 0; users[i]; ++i) {
 		gtk_container_add(GTK_CONTAINER(user_list), users[i]);
 	}
+	free(users);
 	g_signal_connect(user_list, "row-activated", G_CALLBACK(on_user_item_click), NULL);
 
 	// Setup chat interface
@@ -122,5 +147,6 @@ int main(int argc, char *argv[])
 	g_signal_connect(app, "activate", G_CALLBACK (activate), NULL);
 	status = g_application_run(G_APPLICATION (app), argc, argv);
 	g_object_unref(app);
+	free_user_list();
 	return status;
 }
