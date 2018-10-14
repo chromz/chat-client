@@ -11,16 +11,25 @@ struct user_st {
 	const char *name;
 	const char *status;
 };
+static GtkWidget *window;
+static GtkWidget *header_bar;
+static GtkWidget *paned;
+static GtkWidget *user_list;
+static GtkWidget *chat_stack;
+static GtkWidget *welcome_image;
+static GtkWidget *chat_box;
+static GtkWidget *chat_text;
+static GtkWidget *form_box;
+static GtkWidget *send_msg_button;
+static GtkWidget *msg_input;
+static GdkPixbuf *uvg_logo;
+
+static gboolean is_in_chat = FALSE;
 
 static struct user_st **user_st_list = NULL;
 static char *dummy_users = "{"
 	"	\"action\": \"LIST_USER\","
 	"	\"users\": ["
-	"		{"
-	"			\"id\": \"ASDzxfaFA=asd?\","
-	"			\"name\": \"JM\","
-	"			\"status\": \"active\""
-	"		},"
 	"		{"
 	"			\"id\": \"ASDzxfaFA=asd?\","
 	"			\"name\": \"JR\","
@@ -29,6 +38,11 @@ static char *dummy_users = "{"
 	"		{"
 	"			\"id\": \"ASDzxfaFA=asd?\","
 	"			\"name\": \"NM\","
+	"			\"status\": \"active\""
+	"		},"
+	"		{"
+	"			\"id\": \"ASDzxfaFA=asd?\","
+	"			\"name\": \"LV\","
 	"			\"status\": \"active\""
 	"		}"
 	"	]"
@@ -44,7 +58,15 @@ static void free_user_list(void)
 
 static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer user_data)
 {
-	g_print("Holona\n");
+	if (!is_in_chat) {
+		// Show chat interface
+		gtk_stack_set_visible_child_name(GTK_STACK(chat_stack), "chat-box");
+		is_in_chat = TRUE;
+	}
+	gint index = gtk_list_box_row_get_index(row);
+	struct user_st *usr = user_st_list[index];
+	gtk_header_bar_set_title(GTK_HEADER_BAR(header_bar), usr->name);
+	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), usr->status);
 }
 
 static GtkWidget** fetch_users(void)
@@ -70,7 +92,6 @@ static GtkWidget** fetch_users(void)
 		user_st_list[i]->id = json_object_get_string(user_id_j);
 		user_st_list[i]->name = json_object_get_string(user_name_j);
 		user_st_list[i]->status = json_object_get_string(user_status_j);
-		g_print("USER: %s\n", user_st_list[i]->name);
 		users_labels[i] = gtk_label_new(user_st_list[i]->name);
 	}
 	users_labels[usramnt] = NULL;
@@ -82,18 +103,9 @@ static GtkWidget** fetch_users(void)
 // Function to initialize chat gui
 static void activate(GtkApplication *app, gpointer user_data)
 {
-	GtkWidget *window;
-	GtkWidget *header_bar;
-	GtkWidget *paned;
-	GtkWidget *user_list;
-	GtkWidget *chat_stack;
-	GtkWidget *welcome_image;
 
-	// Dummy widgets 
-	GtkWidget *user_1;
 
 	GError *error = NULL;
-	GdkPixbuf *uvg_logo;
 
 	window = gtk_application_window_new(app);
 	gtk_window_set_title(GTK_WINDOW(window), "Chat Client");
@@ -114,6 +126,22 @@ static void activate(GtkApplication *app, gpointer user_data)
 	chat_stack = gtk_stack_new();
 	gtk_stack_add_named(GTK_STACK(chat_stack), welcome_image, "welcome");
 
+	// Chat View
+	chat_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10); 
+	form_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	chat_text = gtk_text_view_new();
+	msg_input = gtk_entry_new();
+	send_msg_button = gtk_button_new_with_label("Send");
+
+	// Add chat textbox
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(chat_text), FALSE);
+	gtk_box_pack_start(GTK_BOX(chat_box), chat_text, TRUE, TRUE, 0);
+
+	// Prepare send message form
+	gtk_box_pack_start(GTK_BOX(form_box), msg_input, TRUE, TRUE, 0);
+	gtk_box_pack_end(GTK_BOX(form_box), send_msg_button, FALSE, FALSE, 0); 
+	gtk_box_pack_end(GTK_BOX(chat_box), form_box, FALSE, FALSE, 0);
+	gtk_stack_add_named(GTK_STACK(chat_stack), chat_box, "chat-box");
 	// List related
 	user_list = gtk_list_box_new();
 
