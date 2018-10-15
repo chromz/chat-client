@@ -2,6 +2,7 @@
 file (GLOB files *.c)
 
 find_package (PkgConfig REQUIRED)
+find_package (Threads REQUIRED)
 pkg_check_modules (GTK3 REQUIRED gtk+-3.0)
 pkg_check_modules (JSONC REQUIRED json-c)
 include_directories (
@@ -16,4 +17,4 @@ file (COPY assets DESTINATION ${CMAKE_BINARY_DIR}/bin)
 
 add_executable (Chat ${files})
 use_c99 ()
-target_link_libraries (Chat ${GTK3_LIBRARIES} ${JSONC_LIBRARIES})
+target_link_libraries (Chat ${GTK3_LIBRARIES} ${JSONC_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})

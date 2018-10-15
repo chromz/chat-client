@@ -1,15 +1,29 @@
 #include <gtk/gtk.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+
 #include <json.h>
 #include <limits.h>
+#include <netdb.h> 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
+#define BUFFER_SIZE 1024
+
 struct user_st {
 	const char *id;
 	const char *name;
 	const char *status;
+};
+
+struct cnc_det {
+	const char *username;
+	const char *ip;
+	int port;
 };
 static GtkWidget *window;
 static GtkWidget *header_bar;
@@ -35,8 +49,10 @@ static GtkWidget *name_in;
 static GtkWidget *ip_in;
 static GtkWidget *port_in;
 static GtkWidget *cnct_btn;
+static GtkWidget *error_label;
 
 static gboolean logged_in = FALSE;
+static gboolean fetching = FALSE;
 
 static struct user_st **user_st_list = NULL;
 static char *dummy_users = "{"
@@ -68,9 +84,94 @@ static void free_user_list(void)
 	free(user_st_list);
 }
 
+static gboolean display_error(void *data)
+{
+	char *msg = (char *) data;
+	gtk_widget_set_sensitive(cnct_btn, TRUE);
+	gtk_label_set_text(GTK_LABEL(error_label), msg);
+	gtk_widget_show(error_label);
+	gtk_spinner_stop(GTK_SPINNER(spinner));
+	return FALSE;
+}
+
+static void handle_error(char *msg)
+{
+	gdk_threads_add_idle(display_error, msg);
+}
+
+static gboolean login_user(void *data)
+{
+	gtk_stack_set_visible_child_name(GTK_STACK(chat_stack), "chat-box");
+	return FALSE;
+}
+
+static void *socket_connect(void *data)
+{
+	int sfd;
+	char msg_buffer[BUFFER_SIZE];
+	struct json_object *ok_j, *status_j;
+	struct sockaddr_in server_addr;
+	struct cnc_det *conn = (struct cnc_det *) data;
+	sfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (sfd < 0) {
+		// Send error message here :p
+		handle_error("Error creating socket");
+	}
+
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_addr.s_addr = inet_addr(conn->ip);
+	server_addr.sin_port = htons(conn->port);
+	int sock_stat = connect(sfd, (struct sockaddr *) &server_addr, sizeof(server_addr));
+	if (sock_stat < 0) {
+		handle_error("Error connecting to server");
+	}
+	// Send handshake
+	json_object *handshake_j = json_object_new_object();
+	json_object *host_j = json_object_new_string(conn->ip);
+	json_object *origin_j = json_object_new_string("chat-client");
+	json_object *user_j = json_object_new_string(conn->username);
+	json_object_object_add(handshake_j, "host", host_j);
+	json_object_object_add(handshake_j, "origin", origin_j);
+	json_object_object_add(handshake_j, "user", user_j);
+	const char *handshake = json_object_to_json_string(handshake_j);
+	int bytes_wrt = write(sfd, handshake, strlen(handshake));
+	if (bytes_wrt == -1) {
+		handle_error("Unable to write to socket");
+	}
+	int bytes_read = read(sfd, msg_buffer, BUFFER_SIZE);
+	if (bytes_read == -1) {
+		handle_error("Error reading handshake");
+	}
+
+	printf("Message recieved: %s\n", msg_buffer);
+	ok_j = json_tokener_parse(msg_buffer);
+	json_object_object_get_ex(ok_j, "status", &status_j);
+	const char *status = json_object_get_string(status_j);
+	if (strcmp(status, "OK") == 0) {
+		gdk_threads_add_idle(login_user, NULL);
+	}
+	free(conn);
+	return NULL;
+}
+
 static void connect_to_server(GtkButton *button, gpointer user_data)
 {
+	if (fetching) {
+		return;
+	}
+	gtk_widget_hide(error_label);
+	gtk_widget_set_sensitive(cnct_btn, FALSE);
+	fetching = TRUE;
 	gtk_spinner_start(GTK_SPINNER(spinner));
+	pthread_t thread;
+	struct cnc_det *connection = malloc(sizeof(struct cnc_det));
+	connection->username = gtk_entry_get_text(GTK_ENTRY(name_in));
+	connection->ip = gtk_entry_get_text(GTK_ENTRY(ip_in));
+	connection->port = (int) strtol(gtk_entry_get_text(GTK_ENTRY(port_in)), NULL, 0);
+	if (pthread_create(&thread, NULL, socket_connect, connection) != 0) {
+		gtk_spinner_stop(GTK_SPINNER(spinner));
+		gtk_widget_show(error_label);
+	}
 }
 
 static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer user_data)
@@ -152,6 +253,7 @@ static void activate(GtkApplication *app, gpointer user_data)
 	port_in = gtk_entry_new();
 	spinner = gtk_spinner_new();
 	cnct_btn = gtk_button_new_with_label("Connect");
+	error_label = gtk_label_new("Error connecting to server");
 
 	gtk_box_pack_start(GTK_BOX(welcome_box), welcome_image, TRUE, TRUE, 20);
 
@@ -163,7 +265,8 @@ static void activate(GtkApplication *app, gpointer user_data)
 	gtk_box_pack_start(GTK_BOX(login_box), port_in, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(login_box), cnct_btn, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(login_box), spinner, FALSE, FALSE, 0);
-
+	gtk_box_pack_start(GTK_BOX(login_box), error_label, FALSE, FALSE, 0);
+	
 	gtk_box_pack_end(GTK_BOX(welcome_box), login_box, FALSE, FALSE, 0);
 	gtk_widget_set_valign(welcome_box, GTK_ALIGN_CENTER);
 	gtk_widget_set_halign(welcome_box, GTK_ALIGN_CENTER);
@@ -209,6 +312,15 @@ static void activate(GtkApplication *app, gpointer user_data)
 	gtk_container_add(GTK_CONTAINER(window), paned);
 	gtk_window_set_titlebar(GTK_WINDOW(window), header_bar);
 	gtk_widget_show_all(window);
+
+
+	// Default values
+	gtk_entry_set_text(GTK_ENTRY(name_in), "chromz");
+	gtk_entry_set_text(GTK_ENTRY(ip_in), "127.0.0.1");
+	gtk_entry_set_text(GTK_ENTRY(port_in), "8000");
+
+	// Hide error message
+	gtk_widget_hide(error_label);
 }
 
 
