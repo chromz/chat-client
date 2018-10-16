@@ -122,8 +122,10 @@ static void *socket_connect(void *data)
 	server_addr.sin_addr.s_addr = inet_addr(conn->ip);
 	server_addr.sin_port = htons(conn->port);
 	int sock_stat = connect(sfd, (struct sockaddr *) &server_addr, sizeof(server_addr));
+
 	if (sock_stat < 0) {
 		handle_error("Error connecting to server");
+		return NULL;
 	}
 	// Send handshake
 	json_object *handshake_j = json_object_new_object();
