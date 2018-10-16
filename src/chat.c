@@ -53,6 +53,7 @@ static GtkWidget *error_label;
 
 static gboolean logged_in = FALSE;
 static gboolean fetching = FALSE;
+static struct user_st current_user;
 
 static struct user_st **user_st_list = NULL;
 static char *dummy_users = "{"
@@ -105,17 +106,26 @@ static gboolean login_user(void *data)
 	return FALSE;
 }
 
+static void test_set_prop(json_bool *err, json_object *obj, char *key, json_object **dest)
+{
+	if (*err) {
+		return;
+	}
+	*err = !json_object_object_get_ex(obj, key, dest);
+}
+
 static void *socket_connect(void *data)
 {
 	int sfd;
 	char msg_buffer[BUFFER_SIZE];
-	struct json_object *ok_j, *status_j;
+	struct json_object *ok_j, *status_j, *usr_data, *id_j, *name_j, *usr_status_j;
 	struct sockaddr_in server_addr;
 	struct cnc_det *conn = (struct cnc_det *) data;
 	sfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (sfd < 0) {
 		// Send error message here :p
 		handle_error("Error creating socket");
+		return NULL;
 	}
 
 	server_addr.sin_family = AF_INET;
@@ -139,10 +149,12 @@ static void *socket_connect(void *data)
 	int bytes_wrt = write(sfd, handshake, strlen(handshake));
 	if (bytes_wrt == -1) {
 		handle_error("Unable to write to socket");
+		return NULL;
 	}
 	int bytes_read = read(sfd, msg_buffer, BUFFER_SIZE);
 	if (bytes_read == -1) {
 		handle_error("Error reading handshake");
+		return NULL;
 	}
 
 	printf("Message recieved: %s\n", msg_buffer);
@@ -152,6 +164,28 @@ static void *socket_connect(void *data)
 	if (strcmp(status, "OK") == 0) {
 		gdk_threads_add_idle(login_user, NULL);
 	}
+	json_bool error;
+	// Set my user identity
+	test_set_prop(&error, ok_j, "user", &usr_data);
+
+	if (error) {
+		handle_error("Invalid server response");
+		return NULL;
+	}
+	test_set_prop(&error, usr_data, "id", &id_j);
+	test_set_prop(&error, usr_data, "name", &name_j);
+	test_set_prop(&error, usr_data, "status", &usr_status_j);
+	if (error) {
+		handle_error("Invalid user object");
+		return NULL;
+	}
+
+	current_user.id = json_object_get_string(id_j);
+	current_user.name = json_object_get_string(name_j);
+	current_user.status = json_object_get_string(usr_status_j);
+
+	// Fetch users
+	
 	free(conn);
 	return NULL;
 }
