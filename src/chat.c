@@ -116,6 +116,7 @@ static void *socket_connect(void *data)
 	if (sfd < 0) {
 		// Send error message here :p
 		handle_error("Error creating socket");
+		return NULL;
 	}
 
 	server_addr.sin_family = AF_INET;
@@ -139,10 +140,12 @@ static void *socket_connect(void *data)
 	int bytes_wrt = write(sfd, handshake, strlen(handshake));
 	if (bytes_wrt == -1) {
 		handle_error("Unable to write to socket");
+		return NULL;
 	}
 	int bytes_read = read(sfd, msg_buffer, BUFFER_SIZE);
 	if (bytes_read == -1) {
 		handle_error("Error reading handshake");
+		return NULL;
 	}
 
 	printf("Message recieved: %s\n", msg_buffer);
