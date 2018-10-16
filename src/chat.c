@@ -155,6 +155,10 @@ static void *socket_connect(void *data)
 	if (strcmp(status, "OK") == 0) {
 		gdk_threads_add_idle(login_user, NULL);
 	}
+
+	// Set my user identity
+	// Fetch users
+
 	free(conn);
 	return NULL;
 }
