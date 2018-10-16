@@ -187,6 +187,11 @@ static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer use
 	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), usr->status);
 }
 
+static void button_clicked(GtkWidget *widget, gpointer user_data)
+{	
+	g_print("clicked");
+}
+
 static GtkWidget** fetch_users(void)
 {
 	int usramnt = 0;
@@ -302,6 +307,9 @@ static void activate(GtkApplication *app, gpointer user_data)
 
 	g_signal_connect(cnct_btn, "clicked", G_CALLBACK(connect_to_server), NULL);
 	g_signal_connect(user_list, "row-activated", G_CALLBACK(on_user_item_click), NULL);
+
+	// send button clicked
+	g_signal_connect(send_msg_button, "clicked", G_CALLBACK(button_clicked), NULL);
 
 	// Setup chat interface
 	paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
