@@ -198,8 +198,23 @@ static GtkWidget** fetch_users(void)
 {
 	int usramnt = 0;
 	GtkWidget **users_labels;
+    struct json_object *req_j, *action_j;
 	struct json_object *server_resp, *user_list_json, *user_obj;
 	struct json_object *user_id_j, *user_name_j, *user_status_j;
+
+    req_j = json_object_new_object();
+    action_j = json_object_new_string("LIST_USER");
+    json_object_object_add(req_data, "action", req_action);
+    const char *req = json_object_to_json_string(req_j);
+    int bytes_wrt = write(sfd, req, strlen(req));
+    if (bytes_wrt == -1) {
+        handle_error("Unable to write to socket");
+    }
+    int bytes_read = read(sfd, msg_buffer, BUFFER_SIZE);
+    if (bytes_read == -1) {
+        handle_error("Error reading handshake");
+    }
+
 	server_resp = json_tokener_parse(dummy_users);
 	if (!json_object_object_get_ex(server_resp, "users", &user_list_json)) {
 		return NULL;
