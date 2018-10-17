@@ -106,6 +106,7 @@ static void handle_error(char *msg)
 static gboolean login_user(void *data)
 {
 	gtk_stack_set_visible_child_name(GTK_STACK(chat_stack), "chat-box");
+	gtk_widget_show(status_combo);
 	return FALSE;
 }
 
@@ -414,6 +415,7 @@ static void activate(GtkApplication *app, gpointer user_data)
 	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), "v1.0");
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header_bar), TRUE);
 	gtk_container_add(GTK_CONTAINER(header_bar), status_combo);
+	gtk_combo_box_set_active(GTK_COMBO_BOX(status_combo), 0);
 	// initial interface
 	uvg_logo = gdk_pixbuf_new_from_file("assets/chat.png", &error);
 	if (uvg_logo == NULL) {
@@ -495,6 +497,7 @@ static void activate(GtkApplication *app, gpointer user_data)
 
 	// Hide error message
 	gtk_widget_hide(error_label);
+	gtk_widget_hide(status_combo);
 }
 
 
