@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <gtk/gtk.h>
+#include <sys/queue.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 
@@ -18,6 +19,12 @@ struct user_st {
 	const char *id;
 	const char *name;
 	const char *status;
+	GtkWidget *label;
+};
+
+struct usr_entry {
+	struct user_st *usr;
+	STAILQ_ENTRY(usr_entry) entries;
 };
 
 struct cnc_det {
@@ -28,6 +35,7 @@ struct cnc_det {
 static int sfd;
 static GtkWidget *window;
 static GtkWidget *header_bar;
+static GtkWidget *status_combo;
 static GtkWidget *paned;
 static GtkWidget *user_list;
 static GtkWidget *chat_stack;
@@ -56,14 +64,28 @@ static gboolean logged_in = FALSE;
 static pthread_mutex_t glock;
 static struct user_st current_user;
 
-static struct user_st **user_st_list = NULL;
+static STAILQ_HEAD(slisthead, usr_entry) user_st_list = STAILQ_HEAD_INITIALIZER(user_st_list);
 
+static struct user_st *find_user_by_index(int index)
+{
+	struct usr_entry *np;
+	int i = 0;
+	STAILQ_FOREACH(np, &user_st_list, entries) {
+		if (i == index) {
+			return np->usr;
+		}
+		i++;
+	}
+	return NULL;
+}
 static void free_user_list(void)
 {
-	for (int i = 0; user_st_list[i]; ++i) {
-		free(user_st_list[i]);
+	struct usr_entry *np;
+	while (!STAILQ_EMPTY(&user_st_list)) {
+		np = STAILQ_FIRST(&user_st_list);
+		STAILQ_REMOVE_HEAD(&user_st_list, entries);
+		free(np);
 	}
-	free(user_st_list);
 }
 
 static gboolean display_error(void *data)
@@ -95,14 +117,16 @@ static void test_set_prop(json_bool *err, json_object *obj, char *key, json_obje
 	*err = !json_object_object_get_ex(obj, key, dest);
 }
 
+
 static gboolean show_users(void *data)
 {
+	struct usr_entry *np;
 	pthread_mutex_lock(&glock);
-	for (int i = 0; user_st_list[i]; ++i) {
-		if (strcmp(user_st_list[i]->id, current_user.id) != 0) {
-			GtkWidget *lab = gtk_label_new(user_st_list[i]->name);
-			gtk_widget_show(lab);
-			gtk_container_add(GTK_CONTAINER(user_list), lab);
+	STAILQ_FOREACH(np, &user_st_list, entries) {
+		if (strcmp(np->usr->id, current_user.id) != 0) {
+			np->usr->label = gtk_label_new(np->usr->name);
+			gtk_widget_show(np->usr->label);
+			gtk_container_add(GTK_CONTAINER(user_list), np->usr->label);
 		}
 	}
 	pthread_mutex_unlock(&glock);
@@ -139,21 +163,104 @@ static void fetch_users(void)
 
 	usramnt = json_object_array_length(user_list_json);
 	pthread_mutex_lock(&glock);
-	user_st_list = malloc((usramnt + 1) * sizeof(struct user_st *));
 	for (int i = 0; i < usramnt; ++i) {
 		user_obj = json_object_array_get_idx(user_list_json, i);
 		json_object_object_get_ex(user_obj, "id", &user_id_j);
 		json_object_object_get_ex(user_obj, "name", &user_name_j);
 		json_object_object_get_ex(user_obj, "status", &user_status_j);
-		user_st_list[i] = malloc(sizeof(struct user_st));
-		user_st_list[i]->id = json_object_get_string(user_id_j);
-		user_st_list[i]->name = json_object_get_string(user_name_j);
-		user_st_list[i]->status = json_object_get_string(user_status_j);
+		struct usr_entry *new_usr = malloc(sizeof(struct usr_entry)); 
+		new_usr->usr = malloc(sizeof(struct user_st));
+		new_usr->usr->id = json_object_get_string(user_id_j);
+		new_usr->usr->name = json_object_get_string(user_name_j);
+		new_usr->usr->status = json_object_get_string(user_status_j);
+		STAILQ_INSERT_TAIL(&user_st_list, new_usr, entries);
 	}
-	user_st_list[usramnt] = NULL;
 	pthread_mutex_unlock(&glock);
 	gdk_threads_add_idle(show_users, NULL);
 
+}
+
+static gboolean add_user_to_list(void *usr_v)
+{
+	struct user_st *usr = (struct user_st *) usr_v;
+	usr->label = gtk_label_new(usr->name);
+	gtk_widget_show(usr->label);
+	gtk_container_add(GTK_CONTAINER(user_list), usr->label);
+	return FALSE;
+}
+
+static void handle_user_connected(struct json_object *req)
+{
+	struct json_object *user, *id_j, *name_j, *status_j;
+	json_bool error = 0;
+	test_set_prop(&error, req, "user", &user);
+	if (error) {
+		printf("Unable to parse user\n");
+		return;
+	}
+	test_set_prop(&error, user, "id", &id_j);
+	test_set_prop(&error, user, "name", &name_j);
+	test_set_prop(&error, user, "status", &status_j);
+	if (error) {
+		printf("Unable to identify user\n");
+		return;
+	}
+	struct usr_entry *new_usr = malloc(sizeof(struct usr_entry)); 
+	new_usr->usr = malloc(sizeof(struct user_st));
+	new_usr->usr->id = json_object_get_string(id_j);
+	new_usr->usr->name = json_object_get_string(name_j);
+	new_usr->usr->status = json_object_get_string(status_j);
+	pthread_mutex_lock(&glock);
+	STAILQ_INSERT_TAIL(&user_st_list, new_usr, entries);
+	pthread_mutex_unlock(&glock);
+	gdk_threads_add_idle(add_user_to_list, new_usr->usr);
+}
+
+
+static void change_user_status(const char *id, const char *new_status)
+{
+	struct usr_entry *np;
+	pthread_mutex_lock(&glock);
+	STAILQ_FOREACH(np, &user_st_list, entries) {
+		if (strcmp(np->usr->id, id) == 0) {
+			// Change user status on
+			np->usr->status = new_status;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&glock);
+}
+
+static void handle_user_changed_status(struct json_object *req)
+{
+	struct json_object *user, *id_j, *status_j;
+	json_bool error = 0;
+	test_set_prop(&error, req, "user", &user);
+	if (error) {
+		printf("Unable to parse user\n");
+		return;
+	}
+	test_set_prop(&error, user, "id", &id_j);
+	test_set_prop(&error, user, "status", &status_j);
+	if (error) {
+		printf("Unable to identify user\n");
+		return;
+	}
+	const char *id = json_object_get_string(id_j);
+	const char *new_status = json_object_get_string(status_j);
+	change_user_status(id, new_status);
+}
+
+static void handle_action(struct json_object *action_j, struct json_object *req)
+{
+	const char *action = json_object_get_string(action_j);
+	if (strcmp(action, "USER_CONNECTED") == 0) {
+		handle_user_connected(req);
+	}
+
+	if (strcmp(action, "CHANGED_STATUS") == 0) {
+		handle_user_changed_status(req);
+	}
 }
 
 static void *socket_connect(void *data)
@@ -213,6 +320,7 @@ static void *socket_connect(void *data)
 		handle_error("Invalid server response");
 		return NULL;
 	}
+
 	test_set_prop(&error, usr_data, "id", &id_j);
 	test_set_prop(&error, usr_data, "name", &name_j);
 	test_set_prop(&error, usr_data, "status", &usr_status_j);
@@ -224,10 +332,25 @@ static void *socket_connect(void *data)
 	current_user.id = json_object_get_string(id_j);
 	current_user.name = json_object_get_string(name_j);
 	current_user.status = json_object_get_string(usr_status_j);
-
 	// Fetch users
-	
 	fetch_users();
+	int rdbytes;
+	struct json_object *req, *action_prop;
+	while (1) {
+		rdbytes= read(sfd, msg_buffer, BUFFER_SIZE);
+		if (rdbytes == 0) {
+			g_print("Server disconnected\n");
+			close(sfd);
+			return NULL;
+		}
+		req = json_tokener_parse(msg_buffer);
+		test_set_prop(&error, req, "action", &action_prop);
+		if (error) {
+			g_print("Error checking for action\n");
+		} else {
+			handle_action(action_prop, req);
+		}
+	}
 	free(conn);
 	return NULL;
 }
@@ -256,7 +379,9 @@ static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer use
 		logged_in = TRUE;
 	}
 	gint index = gtk_list_box_row_get_index(row);
-	struct user_st *usr = user_st_list[index];
+	pthread_mutex_lock(&glock);
+	struct user_st *usr = find_user_by_index(index);
+	pthread_mutex_unlock(&glock);
 	gtk_header_bar_set_title(GTK_HEADER_BAR(header_bar), usr->name);
 	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), usr->status);
 }
@@ -281,10 +406,14 @@ static void activate(GtkApplication *app, gpointer user_data)
 
 	// Setup the header bar
 	header_bar = gtk_header_bar_new();
+	status_combo = gtk_combo_box_text_new();
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(status_combo), NULL, "Active");
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(status_combo), NULL, "Busy");
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(status_combo), NULL, "Inactive");
 	gtk_header_bar_set_title(GTK_HEADER_BAR(header_bar), "Chat Client");
 	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), "v1.0");
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header_bar), TRUE);
-
+	gtk_container_add(GTK_CONTAINER(header_bar), status_combo);
 	// initial interface
 	uvg_logo = gdk_pixbuf_new_from_file("assets/chat.png", &error);
 	if (uvg_logo == NULL) {
@@ -341,11 +470,6 @@ static void activate(GtkApplication *app, gpointer user_data)
 	// List related
 	user_list = gtk_list_box_new();
 
-	// Create dummy users
-	/* GtkWidget **users = fetch_users(); */
-
-	// Add dummy users
-	
 
 	g_signal_connect(cnct_btn, "clicked", G_CALLBACK(connect_to_server), NULL);
 	g_signal_connect(user_list, "row-activated", G_CALLBACK(on_user_item_click), NULL);
