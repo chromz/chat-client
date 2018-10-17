@@ -25,6 +25,7 @@ struct cnc_det {
 	const char *ip;
 	int port;
 };
+static int sfd;
 static GtkWidget *window;
 static GtkWidget *header_bar;
 static GtkWidget *paned;
@@ -52,30 +53,10 @@ static GtkWidget *cnct_btn;
 static GtkWidget *error_label;
 
 static gboolean logged_in = FALSE;
-static gboolean fetching = FALSE;
+static pthread_mutex_t glock;
 static struct user_st current_user;
 
 static struct user_st **user_st_list = NULL;
-static char *dummy_users = "{"
-	"	\"action\": \"LIST_USER\","
-	"	\"users\": ["
-	"		{"
-	"			\"id\": \"ASDzxfaFA=asd?\","
-	"			\"name\": \"JR\","
-	"			\"status\": \"active\""
-	"		},"
-	"		{"
-	"			\"id\": \"ASDzxfaFA=asd?\","
-	"			\"name\": \"NM\","
-	"			\"status\": \"active\""
-	"		},"
-	"		{"
-	"			\"id\": \"ASDzxfaFA=asd?\","
-	"			\"name\": \"LV\","
-	"			\"status\": \"active\""
-	"		}"
-	"	]"
-	"}";
 
 static void free_user_list(void)
 {
@@ -114,9 +95,69 @@ static void test_set_prop(json_bool *err, json_object *obj, char *key, json_obje
 	*err = !json_object_object_get_ex(obj, key, dest);
 }
 
+static gboolean show_users(void *data)
+{
+	pthread_mutex_lock(&glock);
+	for (int i = 0; user_st_list[i]; ++i) {
+		if (strcmp(user_st_list[i]->id, current_user.id) != 0) {
+			GtkWidget *lab = gtk_label_new(user_st_list[i]->name);
+			gtk_widget_show(lab);
+			gtk_container_add(GTK_CONTAINER(user_list), lab);
+		}
+	}
+	pthread_mutex_unlock(&glock);
+	return FALSE;
+}
+
+static void fetch_users(void)
+{
+	int usramnt = 0;
+	char msg_buffer[BUFFER_SIZE];
+	struct json_object *req_j, *action_j;
+	struct json_object *server_resp, *user_list_json, *user_obj;
+	struct json_object *user_id_j, *user_name_j, *user_status_j;
+
+	req_j = json_object_new_object();
+	action_j = json_object_new_string("LIST_USER");
+	json_object_object_add(req_j, "action", action_j);
+	const char *req = json_object_to_json_string(req_j);
+	int bytes_wrt = write(sfd, req, strlen(req));
+	if (bytes_wrt == -1) {
+		handle_error("Unable to write to socket");
+		return;
+	}
+	int bytes_read = read(sfd, msg_buffer, BUFFER_SIZE);
+	if (bytes_read == -1) {
+		handle_error("Error reading users");
+		return;
+	}
+
+	server_resp = json_tokener_parse(msg_buffer);
+	if (!json_object_object_get_ex(server_resp, "users", &user_list_json)) {
+		return;
+	}
+
+	usramnt = json_object_array_length(user_list_json);
+	pthread_mutex_lock(&glock);
+	user_st_list = malloc((usramnt + 1) * sizeof(struct user_st *));
+	for (int i = 0; i < usramnt; ++i) {
+		user_obj = json_object_array_get_idx(user_list_json, i);
+		json_object_object_get_ex(user_obj, "id", &user_id_j);
+		json_object_object_get_ex(user_obj, "name", &user_name_j);
+		json_object_object_get_ex(user_obj, "status", &user_status_j);
+		user_st_list[i] = malloc(sizeof(struct user_st));
+		user_st_list[i]->id = json_object_get_string(user_id_j);
+		user_st_list[i]->name = json_object_get_string(user_name_j);
+		user_st_list[i]->status = json_object_get_string(user_status_j);
+	}
+	user_st_list[usramnt] = NULL;
+	pthread_mutex_unlock(&glock);
+	gdk_threads_add_idle(show_users, NULL);
+
+}
+
 static void *socket_connect(void *data)
 {
-	int sfd;
 	char msg_buffer[BUFFER_SIZE];
 	struct json_object *ok_j, *status_j, *usr_data, *id_j, *name_j, *usr_status_j;
 	struct sockaddr_in server_addr;
@@ -186,18 +227,15 @@ static void *socket_connect(void *data)
 
 	// Fetch users
 	
+	fetch_users();
 	free(conn);
 	return NULL;
 }
 
 static void connect_to_server(GtkButton *button, gpointer user_data)
 {
-	if (fetching) {
-		return;
-	}
 	gtk_widget_hide(error_label);
 	gtk_widget_set_sensitive(cnct_btn, FALSE);
-	fetching = TRUE;
 	gtk_spinner_start(GTK_SPINNER(spinner));
 	pthread_t thread;
 	struct cnc_det *connection = malloc(sizeof(struct cnc_det));
@@ -228,36 +266,7 @@ static void button_clicked(GtkWidget *widget, gpointer user_data)
 	g_print("clicked");
 }
 
-static GtkWidget** fetch_users(void)
-{
-	int usramnt = 0;
-	GtkWidget **users_labels;
-	struct json_object *server_resp, *user_list_json, *user_obj;
-	struct json_object *user_id_j, *user_name_j, *user_status_j;
-	server_resp = json_tokener_parse(dummy_users);
-	if (!json_object_object_get_ex(server_resp, "users", &user_list_json)) {
-		return NULL;
-	}
 
-	usramnt = json_object_array_length(user_list_json);
-	users_labels = malloc((usramnt + 1) * sizeof(GtkWidget*));
-	user_st_list = malloc((usramnt + 1) * sizeof(struct user_st *));
-	for (int i = 0; i < usramnt; ++i) {
-		user_obj = json_object_array_get_idx(user_list_json, i);
-		json_object_object_get_ex(user_obj, "id", &user_id_j);
-		json_object_object_get_ex(user_obj, "name", &user_name_j);
-		json_object_object_get_ex(user_obj, "status", &user_status_j);
-		user_st_list[i] = malloc(sizeof(struct user_st));
-		user_st_list[i]->id = json_object_get_string(user_id_j);
-		user_st_list[i]->name = json_object_get_string(user_name_j);
-		user_st_list[i]->status = json_object_get_string(user_status_j);
-		users_labels[i] = gtk_label_new(user_st_list[i]->name);
-	}
-	users_labels[usramnt] = NULL;
-	user_st_list[usramnt] = NULL;
-
-	return users_labels;
-}
 
 // Function to initialize chat gui
 static void activate(GtkApplication *app, gpointer user_data)
@@ -336,10 +345,7 @@ static void activate(GtkApplication *app, gpointer user_data)
 	/* GtkWidget **users = fetch_users(); */
 
 	// Add dummy users
-	/* for (int i = 0; users[i]; ++i) { */
-	/* 	gtk_container_add(GTK_CONTAINER(user_list), users[i]); */
-	/* } */
-	/* free(users); */
+	
 
 	g_signal_connect(cnct_btn, "clicked", G_CALLBACK(connect_to_server), NULL);
 	g_signal_connect(user_list, "row-activated", G_CALLBACK(on_user_item_click), NULL);
@@ -372,10 +378,14 @@ int main(int argc, char *argv[])
 {
 	GtkApplication *app;
 	int status;
+	if (pthread_mutex_init(&glock, NULL) != 0) { 
+		handle_error("Failed to initialize mutex\n"); 
+	}
 	app = gtk_application_new("gt.uvg.chat", G_APPLICATION_FLAGS_NONE);
 	g_signal_connect(app, "activate", G_CALLBACK (activate), NULL);
 	status = g_application_run(G_APPLICATION (app), argc, argv);
 	g_object_unref(app);
+	pthread_mutex_destroy(&glock);
 	/* free_user_list(); */
 	return status;
 }
