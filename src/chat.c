@@ -62,9 +62,30 @@ static GtkWidget *error_label;
 
 static gboolean logged_in = FALSE;
 static pthread_mutex_t glock;
-static struct user_st current_user;
+static pthread_mutex_t socket_lock;
+static struct user_st *current_user;
 
 static STAILQ_HEAD(slisthead, usr_entry) user_st_list = STAILQ_HEAD_INITIALIZER(user_st_list);
+
+static gboolean show_error_gui(void *msg_v)
+{
+	char *msg = (char *) msg_v;
+	GtkWidget *dialog;
+	GtkDialogFlags flags = GTK_DIALOG_MODAL; 
+	dialog = gtk_message_dialog_new(GTK_WINDOW(window), flags,
+			GTK_MESSAGE_ERROR,
+			GTK_BUTTONS_CLOSE,
+			"%s",
+			msg);
+	gtk_dialog_run(GTK_DIALOG(dialog));
+	gtk_widget_destroy(dialog);
+	return FALSE;
+}
+
+static void show_error(char *msg)
+{
+	gdk_threads_add_idle(show_error_gui, msg);
+}
 
 static struct user_st *find_user_by_index(int index)
 {
@@ -124,7 +145,7 @@ static gboolean show_users(void *data)
 	struct usr_entry *np;
 	pthread_mutex_lock(&glock);
 	STAILQ_FOREACH(np, &user_st_list, entries) {
-		if (strcmp(np->usr->id, current_user.id) != 0) {
+		if (strcmp(np->usr->id, current_user->id) != 0) {
 			np->usr->label = gtk_label_new(np->usr->name);
 			gtk_widget_show(np->usr->label);
 			gtk_container_add(GTK_CONTAINER(user_list), np->usr->label);
@@ -134,7 +155,7 @@ static gboolean show_users(void *data)
 	return FALSE;
 }
 
-static void fetch_users(void)
+static void fetch_users(const char *userid)
 {
 	int usramnt = 0;
 	char msg_buffer[BUFFER_SIZE];
@@ -146,7 +167,9 @@ static void fetch_users(void)
 	action_j = json_object_new_string("LIST_USER");
 	json_object_object_add(req_j, "action", action_j);
 	const char *req = json_object_to_json_string(req_j);
+	pthread_mutex_lock(&socket_lock);
 	int bytes_wrt = write(sfd, req, strlen(req));
+	pthread_mutex_unlock(&socket_lock);
 	if (bytes_wrt == -1) {
 		handle_error("Unable to write to socket");
 		return;
@@ -174,6 +197,9 @@ static void fetch_users(void)
 		new_usr->usr->id = json_object_get_string(user_id_j);
 		new_usr->usr->name = json_object_get_string(user_name_j);
 		new_usr->usr->status = json_object_get_string(user_status_j);
+		if (strcmp(userid, new_usr->usr->id) == 0) {
+			current_user = new_usr->usr;
+		}
 		STAILQ_INSERT_TAIL(&user_st_list, new_usr, entries);
 	}
 	pthread_mutex_unlock(&glock);
@@ -295,7 +321,9 @@ static void *socket_connect(void *data)
 	json_object_object_add(handshake_j, "origin", origin_j);
 	json_object_object_add(handshake_j, "user", user_j);
 	const char *handshake = json_object_to_json_string(handshake_j);
+	pthread_mutex_lock(&socket_lock);
 	int bytes_wrt = write(sfd, handshake, strlen(handshake));
+	pthread_mutex_unlock(&socket_lock);
 	if (bytes_wrt == -1) {
 		handle_error("Unable to write to socket");
 		return NULL;
@@ -330,30 +358,83 @@ static void *socket_connect(void *data)
 		return NULL;
 	}
 
-	current_user.id = json_object_get_string(id_j);
-	current_user.name = json_object_get_string(name_j);
-	current_user.status = json_object_get_string(usr_status_j);
+	const char *userid = json_object_get_string(id_j);
 	// Fetch users
-	fetch_users();
+	fetch_users(userid);
 	int rdbytes;
 	struct json_object *req, *action_prop;
 	while (1) {
 		rdbytes= read(sfd, msg_buffer, BUFFER_SIZE);
 		if (rdbytes == 0) {
-			g_print("Server disconnected\n");
+			show_error("Server disconnected\n");
 			close(sfd);
 			return NULL;
 		}
 		req = json_tokener_parse(msg_buffer);
 		test_set_prop(&error, req, "action", &action_prop);
 		if (error) {
-			g_print("Error checking for action\n");
+			show_error("Error checking for action\n");
 		} else {
 			handle_action(action_prop, req);
 		}
 	}
 	free(conn);
 	return NULL;
+}
+
+static void *request_user_status_change(void *nstat)
+{
+	char *new_stat = (char *) nstat;
+	char msg_buffer[BUFFER_SIZE];
+	struct json_object *req_j, *action_j, *ok_j, *status_j;
+	struct json_object *server_resp, *user_list_json, *user_obj;
+	struct json_object *user_id_j, *user_name_j, *user_status_j;
+
+	int error, rdbytes = 0;
+	req_j = json_object_new_object();
+	action_j = json_object_new_string("CHANGE_STATUS");
+	user_id_j = json_object_new_string(current_user->id);
+	user_status_j = json_object_new_string(new_stat);
+	json_object_object_add(req_j, "action", action_j);
+	json_object_object_add(req_j, "user", user_id_j);
+	json_object_object_add(req_j, "status", user_status_j);
+	const char *req = json_object_to_json_string(req_j);
+	pthread_mutex_lock(&socket_lock);
+	error = write(sfd, req, strlen(req));
+	if (error == -1) {
+		show_error("Error writing to socket\n");
+		return NULL;
+	}
+	// Wait for the ok
+	rdbytes = read(sfd, msg_buffer, BUFFER_SIZE);
+	if (rdbytes == -1) {
+		show_error("Error reading from server\n");
+		return NULL;
+	}
+	ok_j = json_tokener_parse(msg_buffer);
+	json_object_object_get_ex(ok_j, "status", &status_j);
+	const char *status = json_object_get_string(status_j);
+	if (strcmp(status, "OK") == 0) {
+
+	} else {
+		show_error("Server error");
+	}
+	pthread_mutex_unlock(&socket_lock);
+	return NULL;
+}
+
+static void on_user_change_status(GtkComboBox *widget, gpointer user_data)
+{
+	gtk_widget_set_sensitive(GTK_WIDGET(widget), FALSE);
+	gchar *new_status = gtk_combo_box_text_get_active_text(
+			GTK_COMBO_BOX_TEXT(widget));
+	pthread_t thread;
+	pthread_create(&thread, NULL, request_user_status_change, new_status);
+	if (pthread_detach(thread) != 0) {
+		g_print("Unable to detach pthread\n");
+	}
+	printf("New Status %s\n", new_status);
+
 }
 
 static void connect_to_server(GtkButton *button, gpointer user_data)
@@ -369,6 +450,9 @@ static void connect_to_server(GtkButton *button, gpointer user_data)
 	if (pthread_create(&thread, NULL, socket_connect, connection) != 0) {
 		gtk_spinner_stop(GTK_SPINNER(spinner));
 		gtk_widget_show(error_label);
+	}
+	if (pthread_detach(thread) != 0) {
+		show_error("Unable to detach pthread\n");
 	}
 }
 
@@ -408,9 +492,9 @@ static void activate(GtkApplication *app, gpointer user_data)
 	// Setup the header bar
 	header_bar = gtk_header_bar_new();
 	status_combo = gtk_combo_box_text_new();
-	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(status_combo), NULL, "Active");
-	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(status_combo), NULL, "Busy");
-	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(status_combo), NULL, "Inactive");
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(status_combo), NULL, "active");
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(status_combo), NULL, "busy");
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(status_combo), NULL, "inactive");
 	gtk_header_bar_set_title(GTK_HEADER_BAR(header_bar), "Chat Client");
 	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), "v1.0");
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header_bar), TRUE);
@@ -475,6 +559,7 @@ static void activate(GtkApplication *app, gpointer user_data)
 
 	g_signal_connect(cnct_btn, "clicked", G_CALLBACK(connect_to_server), NULL);
 	g_signal_connect(user_list, "row-activated", G_CALLBACK(on_user_item_click), NULL);
+	g_signal_connect(status_combo, "changed", G_CALLBACK(on_user_change_status), NULL);
 
 	// send button clicked
 	g_signal_connect(send_msg_button, "clicked", G_CALLBACK(button_clicked), NULL);
@@ -506,6 +591,10 @@ int main(int argc, char *argv[])
 	GtkApplication *app;
 	int status;
 	if (pthread_mutex_init(&glock, NULL) != 0) { 
+		handle_error("Failed to initialize mutex\n"); 
+	}
+
+	if (pthread_mutex_init(&socket_lock, NULL) != 0) { 
 		handle_error("Failed to initialize mutex\n"); 
 	}
 	app = gtk_application_new("gt.uvg.chat", G_APPLICATION_FLAGS_NONE);
