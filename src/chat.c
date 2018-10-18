@@ -149,8 +149,10 @@ static gboolean show_users(void *data)
 	pthread_mutex_lock(&glock);
 	STAILQ_FOREACH(np, &user_st_list, entries) {
 		if (strcmp(np->usr->id, current_user->id) != 0) {
-			np->usr->label = gtk_label_new(np->usr->name);
-			gtk_widget_show(np->usr->label);
+            GtkWidget *label = gtk_label_new(np->usr->name);
+			np->usr->label = gtk_list_box_row_new();
+            gtk_container_add(GTK_CONTAINER(np->usr->label), label);
+			gtk_widget_show(label);
 			gtk_container_add(GTK_CONTAINER(user_list), np->usr->label);
 		}
 	}
@@ -182,7 +184,7 @@ static void fetch_users(const char *userid)
 		handle_error("Error reading users");
 		return;
 	}
-
+    printf("perros %s\n",msg_buffer);
 	server_resp = json_tokener_parse(msg_buffer);
 	if (!json_object_object_get_ex(server_resp, "users", &user_list_json)) {
 		return;
@@ -213,8 +215,10 @@ static void fetch_users(const char *userid)
 static gboolean add_user_to_list(void *usr_v)
 {
 	struct user_st *usr = (struct user_st *) usr_v;
-	usr->label = gtk_label_new(usr->name);
-	gtk_widget_show(usr->label);
+	GtkWidget *label = gtk_label_new(usr->name);
+    usr->label = gtk_list_box_row_new();
+    gtk_container_add(GTK_CONTAINER(usr->label), label);
+    gtk_widget_show(label);
 	gtk_container_add(GTK_CONTAINER(user_list), usr->label);
 	return FALSE;
 }
@@ -312,6 +316,7 @@ static void handle_action(struct json_object *action_j, struct json_object *req)
 {
 	const char *action = json_object_get_string(action_j);
 	if (strcmp(action, "USER_CONNECTED") == 0) {
+        printf("entro");
 		handle_user_connected(req);
 	}
 
