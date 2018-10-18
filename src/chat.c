@@ -264,6 +264,13 @@ static void handle_user_connected(struct json_object *req)
 	gdk_threads_add_idle(add_user_to_list, new_usr->usr);
 }
 
+static gboolean update_gui_status(void *new_stat_v)
+{
+	const char *new_stat = *(const char **) new_stat_v;
+	gtk_widget_set_sensitive(GTK_WIDGET(status_combo), TRUE);
+	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), new_stat);
+	return FALSE;
+}
 
 static void change_user_status(const char *id, const char *new_status)
 {
@@ -273,6 +280,7 @@ static void change_user_status(const char *id, const char *new_status)
 		if (strcmp(np->usr->id, id) == 0) {
 			// Change user status on
 			np->usr->status = new_status;
+			gdk_threads_add_idle(update_gui_status, &new_status);
 			break;
 		}
 	}
@@ -368,13 +376,7 @@ static void handle_action(struct json_object *action_j, struct json_object *req)
 	}
 }
 
-static gboolean update_gui_status(void *new_stat_v)
-{
-	const char *new_stat = *(const char **) new_stat_v;
-	gtk_widget_set_sensitive(GTK_WIDGET(status_combo), TRUE);
-	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), new_stat);
-	return FALSE;
-}
+
 
 static void handle_status(struct json_object *stat_prop, struct json_object *res)
 {
