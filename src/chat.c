@@ -436,7 +436,7 @@ static void handle_status(struct json_object *stat_prop, struct json_object *res
 		if (strcmp(action, "CHANGE_STATUS") == 0) {
 			gdk_threads_add_idle(update_gui_status, &new_stat);
 		} else if (strcmp(action, "SEND_MESSAGE") == 0) {
-
+			handle_send_message();
 		}
 	} else {
 		previous_action = NULL;
