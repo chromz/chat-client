@@ -68,6 +68,7 @@ static pthread_mutex_t glock;
 static pthread_mutex_t socket_lock;
 static struct user_st *current_user;
 static struct user_st *current_selected_user;
+static struct json_object* previous_action;
 
 static STAILQ_HEAD(slisthead, usr_entry) user_st_list = STAILQ_HEAD_INITIALIZER(user_st_list);
 
@@ -367,6 +368,39 @@ static void handle_action(struct json_object *action_j, struct json_object *req)
 	}
 }
 
+static gboolean update_gui_status(void *new_stat_v)
+{
+	const char *new_stat = *(const char **) new_stat_v;
+	gtk_widget_set_sensitive(GTK_WIDGET(status_combo), TRUE);
+	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), new_stat);
+	return FALSE;
+}
+
+static void handle_status(struct json_object *stat_prop, struct json_object *res)
+{
+	struct json_object *action_j, *status_j;
+	const char *s_stat = json_object_get_string(stat_prop);
+	json_bool error = 0;
+	if (strcmp(s_stat, "OK") == 0) {
+		test_set_prop(&error, previous_action, "action", &action_j);
+		test_set_prop(&error, previous_action, "status", &status_j);
+		if (error) {
+			previous_action = NULL;
+			return;
+		}
+		const char *action = json_object_get_string(action_j);
+		const char *new_stat = json_object_get_string(status_j);
+		if (strcmp(action, "CHANGE_STATUS") == 0) {
+			gdk_threads_add_idle(update_gui_status, &new_stat);
+		} else if (strcmp(action, "SEND_MESSAGE") == 0) {
+
+		}
+	} else {
+		previous_action = NULL;
+		return;
+	}
+}
+
 static void *socket_connect(void *data)
 {
 	char msg_buffer[BUFFER_SIZE];
@@ -439,25 +473,35 @@ static void *socket_connect(void *data)
 	// Fetch users
 	fetch_users(userid);
 	int rdbytes;
-	struct json_object *req, *action_prop;
+	struct json_object *req, *action_prop, *stat_prop;
 	while (1) {
-		rdbytes= read(sfd, msg_buffer, BUFFER_SIZE);
+		rdbytes = read(sfd, msg_buffer, BUFFER_SIZE);
 		if (rdbytes == 0) {
 			show_error("Server disconnected\n");
 			close(sfd);
 			return NULL;
 		}
 		req = json_tokener_parse(msg_buffer);
-		test_set_prop(&error, req, "action", &action_prop);
+		printf("REQ %s\n", msg_buffer);
+		test_set_prop(&error, req, "status", &stat_prop);
 		if (error) {
-			show_error("Error checking for action\n");
+			error = 0;
+			test_set_prop(&error, req, "action", &action_prop);
+			if (error) {
+				show_error("Error checking for action\n");
+			} else {
+				handle_action(action_prop, req);
+			}
 		} else {
-			handle_action(action_prop, req);
+			handle_status(stat_prop, req);
 		}
+		
 	}
 	free(conn);
 	return NULL;
 }
+
+
 
 
 static void *request_user_status_change(void *nstat)
@@ -484,19 +528,7 @@ static void *request_user_status_change(void *nstat)
 		return NULL;
 	}
 	// Wait for the ok
-	rdbytes = read(sfd, msg_buffer, BUFFER_SIZE);
-	if (rdbytes == -1) {
-		show_error("Error reading from server\n");
-		return NULL;
-	}
-	ok_j = json_tokener_parse(msg_buffer);
-	json_object_object_get_ex(ok_j, "status", &status_j);
-	const char *status = json_object_get_string(status_j);
-	if (strcmp(status, "OK") == 0) {
-
-	} else {
-		show_error("Server error");
-	}
+	previous_action = req_j;
 	pthread_mutex_unlock(&socket_lock);
 	return NULL;
 }
