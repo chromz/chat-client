@@ -269,7 +269,6 @@ static gboolean update_gui_status(void *new_stat_v)
 {
 	const char *new_stat = *(const char **) new_stat_v;
 	gtk_widget_set_sensitive(GTK_WIDGET(status_combo), TRUE);
-	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), new_stat);
 	return FALSE;
 }
 
