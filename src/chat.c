@@ -376,8 +376,8 @@ static void handle_send_message(void)
 {
 	struct usr_entry *np;
 	struct json_object *message_j, *to_j;
-	json_bool error;
-	test_set_prop(&error, previous_action, "from", &to_j);
+	json_bool error = 0;
+	test_set_prop(&error, previous_action, "to", &to_j);
 	test_set_prop(&error, previous_action, "message", &message_j);
 	if (error) {
 		printf("Unable to parse message\n");
@@ -385,12 +385,13 @@ static void handle_send_message(void)
 	}
 	const char *to_id = json_object_get_string(to_j);
 	const char *msg = json_object_get_string(message_j);
+	printf("TO ID %s\n MSG %s\n", to_id, msg);
 	pthread_mutex_lock(&glock);
 	STAILQ_FOREACH(np, &user_st_list, entries) {
-		printf("JUPUTA\n");
+		printf("ids %s\n", np->usr->id);
 		if (strcmp(np->usr->id, to_id) == 0) {
-			printf("ENTRE\n");
 			sprintf(np->usr->msgs, "%s\n %s : %s", np->usr->msgs, current_user->name, msg);
+			printf("MESS %s\n", np->usr->msgs);
 		}
 	}
 	gdk_threads_add_idle(refresh_chat, NULL);
@@ -424,16 +425,17 @@ static void handle_status(struct json_object *stat_prop, struct json_object *res
 	struct json_object *action_j, *status_j;
 	const char *s_stat = json_object_get_string(stat_prop);
 	json_bool error = 0;
+	printf("PREVIOUS ACTION %s\n", json_object_to_json_string(previous_action));
 	if (strcmp(s_stat, "OK") == 0) {
 		test_set_prop(&error, previous_action, "action", &action_j);
-		test_set_prop(&error, previous_action, "status", &status_j);
 		if (error) {
 			previous_action = NULL;
 			return;
 		}
 		const char *action = json_object_get_string(action_j);
-		const char *new_stat = json_object_get_string(status_j);
 		if (strcmp(action, "CHANGE_STATUS") == 0) {
+			test_set_prop(&error, previous_action, "status", &status_j);
+			const char *new_stat = json_object_get_string(status_j);
 			gdk_threads_add_idle(update_gui_status, &new_stat);
 		} else if (strcmp(action, "SEND_MESSAGE") == 0) {
 			handle_send_message();
@@ -633,6 +635,7 @@ static void *request_send_message(void *msg_v)
 	json_object_object_add(req_j, "from", from_j);
 	json_object_object_add(req_j, "to", to_j);
 	json_object_object_add(req_j, "message", msg_j);
+	previous_action = req_j;
 	const char *req = json_object_to_json_string(req_j);
 	pthread_mutex_lock(&socket_lock);
 	error = write(sfd, req, strlen(req));
