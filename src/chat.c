@@ -152,7 +152,8 @@ static gboolean show_users(void *data)
             GtkWidget *label = gtk_label_new(np->usr->name);
 			np->usr->label = gtk_list_box_row_new();
             gtk_container_add(GTK_CONTAINER(np->usr->label), label);
-			gtk_widget_show(label);
+			gtk_widget_show(np->usr->label);
+            gtk_widget_show(label);
 			gtk_container_add(GTK_CONTAINER(user_list), np->usr->label);
 		}
 	}
@@ -218,6 +219,7 @@ static gboolean add_user_to_list(void *usr_v)
 	GtkWidget *label = gtk_label_new(usr->name);
     usr->label = gtk_list_box_row_new();
     gtk_container_add(GTK_CONTAINER(usr->label), label);
+    gtk_widget_show(usr->label);
     gtk_widget_show(label);
 	gtk_container_add(GTK_CONTAINER(user_list), usr->label);
 	return FALSE;
