@@ -16,10 +16,11 @@
 #define BUFFER_SIZE 1024
 #define MSG_BUFFER_SIZE 8000
 
+
 struct user_st {
 	const char *id;
 	const char *name;
-	const char *msgs;
+	char *msgs;
 	const char *status;
 	GtkWidget *label;
 };
@@ -68,6 +69,7 @@ static pthread_mutex_t glock;
 static pthread_mutex_t socket_lock;
 static struct user_st *current_user;
 static struct user_st *current_selected_user;
+static const char *message;
 
 static STAILQ_HEAD(slisthead, usr_entry) user_st_list = STAILQ_HEAD_INITIALIZER(user_st_list);
 
@@ -188,7 +190,6 @@ static void fetch_users(const char *userid)
 		handle_error("Error reading users");
 		return;
 	}
-	printf("perros %s\n",msg_buffer);
 	server_resp = json_tokener_parse(msg_buffer);
 	if (!json_object_object_get_ex(server_resp, "users", &user_list_json)) {
 		return;
@@ -313,10 +314,19 @@ static void handle_user_disconnected(struct json_object *req)
 		if (strcmp(np->usr->id, user_id) == 0) {
 			STAILQ_REMOVE(&user_st_list, np, usr_entry, entries);
 			gtk_widget_destroy(np->usr->label);
+			free(np->usr->msgs);
 			free(np);
 		}
 	}
 	pthread_mutex_unlock(&glock);
+}
+
+static gboolean refresh_chat(void *data)
+{
+	GtkTextBuffer *buffer = gtk_text_buffer_new(NULL);
+	gtk_text_buffer_set_text(buffer, current_selected_user->msgs, strlen(current_selected_user->msgs));
+	gtk_text_view_set_buffer(GTK_TEXT_VIEW(chat_text), buffer);
+	return FALSE;
 }
 
 static void handle_receive_message(struct json_object *req) 
@@ -331,13 +341,27 @@ static void handle_receive_message(struct json_object *req)
 		return;
 	}
 	const char *from_id = json_object_get_string(from_j);
-	const char *message = json_object_get_string(message_j);
+	const char *msg = json_object_get_string(message_j);
 	pthread_mutex_lock(&glock);
 	STAILQ_FOREACH(np, &user_st_list, entries) {
 		if (strcmp(np->usr->id, from_id) == 0) {
-
+			sprintf(np->usr->msgs, "%s\n %s : %s", np->usr->msgs, from_id, msg);
 		}
 	}
+	gdk_threads_add_idle(refresh_chat, NULL);
+	pthread_mutex_unlock(&glock);
+}
+
+static void handle_send_message()
+{
+	struct usr_entry *np;
+	pthread_mutex_lock(&glock);
+	STAILQ_FOREACH(np, &user_st_list, entries) {
+		if (strcmp(np->usr->id, COSA_PREVIA_USR_ID) == 0) {
+			sprintf(np->usr->msgs, "%s\n %s : %s", np->usr->msgs, current_user->name, message);
+		}
+	}
+	gdk_threads_add_idle(refresh_chat, NULL);
 	pthread_mutex_unlock(&glock);
 }
 
@@ -544,20 +568,38 @@ static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer use
 	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), current_selected_user->status);
 }
 
-static void *handle_send_message(void *msg_v) {
-
-	const char *msg = *(char **) msg_v;
-
+static void *request_send_message(void *msg_v) 
+{
+	struct json_object *action_j, *from_j, *to_j, *msg_j, *req_j;
+	req_j = json_object_new_object();
+	action_j = json_object_new_string("SEND_MESSAGE");	
+	from_j = json_object_new_string(current_user->id);
+	to_j = json_object_new_string(current_selected_user->id);
+	msg_j = json_object_new_string(message);
+	json_object_object_add(req_j, "action", action_j);
+	json_object_object_add(req_j, "from", from_j);
+	json_object_object_add(req_j, "to", to_j);
+	json_object_object_add(req_j, "message", msg_j);
+	const char *req = json_object_to_json_string(req_j);
+	pthread_mutex_lock(&socket_lock);
+	error = write(sfd, req, strlen(req));
+	if (error == -1) {
+		show_error("Error writing to socket\n");
+		return NULL;
+	}
+	pthread_mutex_unlock(&socket_lock);
 	return NULL;
 }
 
 static void button_clicked(GtkWidget *widget, gpointer user_data)
-{	
-	const char *msg = gtk_entry_get_text(GTK_ENTRY(msg_input));
-	pthread_t thread;
-	pthread_create(&thread, NULL, handle_send_message, &msg);
-	if (pthread_detach(thread) != 0) {
-		g_printerr("Error on detach thread\n");
+{
+	if (current_selected_user != NULL) {
+		message = gtk_entry_get_text(GTK_ENTRY(msg_input));
+		pthread_t thread;
+		pthread_create(&thread, NULL, request_send_message, NULL);
+		if (pthread_detach(thread) != 0) {
+			g_printerr("Error on detach thread\n");
+		}
 	}
 }
 
