@@ -188,7 +188,6 @@ static void fetch_users(const char *userid)
 		handle_error("Error reading users");
 		return;
 	}
-	printf("perros %s\n",msg_buffer);
 	server_resp = json_tokener_parse(msg_buffer);
 	if (!json_object_object_get_ex(server_resp, "users", &user_list_json)) {
 		return;
@@ -201,16 +200,23 @@ static void fetch_users(const char *userid)
 		json_object_object_get_ex(user_obj, "id", &user_id_j);
 		json_object_object_get_ex(user_obj, "name", &user_name_j);
 		json_object_object_get_ex(user_obj, "status", &user_status_j);
-		struct usr_entry *new_usr = malloc(sizeof(struct usr_entry)); 
-		new_usr->usr = malloc(sizeof(struct user_st));
-		new_usr->usr->id = json_object_get_string(user_id_j);
-		new_usr->usr->msgs = malloc(MSG_BUFFER_SIZE);
-		new_usr->usr->name = json_object_get_string(user_name_j);
-		new_usr->usr->status = json_object_get_string(user_status_j);
-		if (strcmp(userid, new_usr->usr->id) == 0) {
-			current_user = new_usr->usr;
-		}
-		STAILQ_INSERT_TAIL(&user_st_list, new_usr, entries);
+		const char *id = json_object_get_string(user_id_j);
+		
+		if (strcmp(userid, id) == 0) {
+			struct user_st *usr = malloc(sizeof(struct user_st));
+			usr->id = id;
+			usr->name = json_object_get_string(user_name_j);
+			usr->status = json_object_get_string(user_status_j);
+			current_user = usr;
+		} else {
+			struct usr_entry *new_usr = malloc(sizeof(struct usr_entry)); 
+			new_usr->usr = malloc(sizeof(struct user_st));
+			new_usr->usr->id = id;
+			new_usr->usr->msgs = malloc(MSG_BUFFER_SIZE);
+			new_usr->usr->name = json_object_get_string(user_name_j);
+			new_usr->usr->status = json_object_get_string(user_status_j);
+			STAILQ_INSERT_TAIL(&user_st_list, new_usr, entries);
+		}	
 	}
 	pthread_mutex_unlock(&glock);
 	gdk_threads_add_idle(show_users, NULL);
@@ -345,7 +351,6 @@ static void handle_action(struct json_object *action_j, struct json_object *req)
 {
 	const char *action = json_object_get_string(action_j);
 	if (strcmp(action, "USER_CONNECTED") == 0) {
-		printf("entro");
 		handle_user_connected(req);
 	}
 
@@ -531,12 +536,8 @@ static void connect_to_server(GtkButton *button, gpointer user_data)
 
 static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer user_data)
 {
-	if (!logged_in) {
-		// Show chat interface
-		gtk_stack_set_visible_child_name(GTK_STACK(chat_stack), "chat-box");
-		logged_in = TRUE;
-	}
 	gint index = gtk_list_box_row_get_index(row);
+	printf("INDEX %d\n", index);
 	pthread_mutex_lock(&glock);
 	current_selected_user = find_user_by_index(index);
 	pthread_mutex_unlock(&glock);
