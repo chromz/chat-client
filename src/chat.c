@@ -70,6 +70,7 @@ static pthread_mutex_t socket_lock;
 static struct user_st *current_user;
 static struct user_st *current_selected_user;
 static const char *message;
+static struct json_object* previous_action;
 
 static STAILQ_HEAD(slisthead, usr_entry) user_st_list = STAILQ_HEAD_INITIALIZER(user_st_list);
 
@@ -202,16 +203,23 @@ static void fetch_users(const char *userid)
 		json_object_object_get_ex(user_obj, "id", &user_id_j);
 		json_object_object_get_ex(user_obj, "name", &user_name_j);
 		json_object_object_get_ex(user_obj, "status", &user_status_j);
-		struct usr_entry *new_usr = malloc(sizeof(struct usr_entry)); 
-		new_usr->usr = malloc(sizeof(struct user_st));
-		new_usr->usr->id = json_object_get_string(user_id_j);
-		new_usr->usr->msgs = malloc(MSG_BUFFER_SIZE);
-		new_usr->usr->name = json_object_get_string(user_name_j);
-		new_usr->usr->status = json_object_get_string(user_status_j);
-		if (strcmp(userid, new_usr->usr->id) == 0) {
-			current_user = new_usr->usr;
-		}
-		STAILQ_INSERT_TAIL(&user_st_list, new_usr, entries);
+		const char *id = json_object_get_string(user_id_j);
+		
+		if (strcmp(userid, id) == 0) {
+			struct user_st *usr = malloc(sizeof(struct user_st));
+			usr->id = id;
+			usr->name = json_object_get_string(user_name_j);
+			usr->status = json_object_get_string(user_status_j);
+			current_user = usr;
+		} else {
+			struct usr_entry *new_usr = malloc(sizeof(struct usr_entry)); 
+			new_usr->usr = malloc(sizeof(struct user_st));
+			new_usr->usr->id = id;
+			new_usr->usr->msgs = malloc(MSG_BUFFER_SIZE);
+			new_usr->usr->name = json_object_get_string(user_name_j);
+			new_usr->usr->status = json_object_get_string(user_status_j);
+			STAILQ_INSERT_TAIL(&user_st_list, new_usr, entries);
+		}	
 	}
 	pthread_mutex_unlock(&glock);
 	gdk_threads_add_idle(show_users, NULL);
@@ -258,6 +266,13 @@ static void handle_user_connected(struct json_object *req)
 	gdk_threads_add_idle(add_user_to_list, new_usr->usr);
 }
 
+static gboolean update_gui_status(void *new_stat_v)
+{
+	const char *new_stat = *(const char **) new_stat_v;
+	gtk_widget_set_sensitive(GTK_WIDGET(status_combo), TRUE);
+	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), new_stat);
+	return FALSE;
+}
 
 static void change_user_status(const char *id, const char *new_status)
 {
@@ -267,6 +282,7 @@ static void change_user_status(const char *id, const char *new_status)
 		if (strcmp(np->usr->id, id) == 0) {
 			// Change user status on
 			np->usr->status = new_status;
+			gdk_threads_add_idle(update_gui_status, &new_status);
 			break;
 		}
 	}
@@ -355,10 +371,20 @@ static void handle_receive_message(struct json_object *req)
 static void handle_send_message()
 {
 	struct usr_entry *np;
+	struct json_object *message_j, *to_j;
+	json_bool error;
+	test_set_prop(&error, previous_action, "from", &to_j);
+	test_set_prop(&error, previous_action, "message", &message_j);
+	if (error) {
+		printf("Unable to parse message\n");
+		return;
+	}
+	const char *to_id = json_object_get_string(to_j);
+	const char *msg = json_object_get_string(message_j);
 	pthread_mutex_lock(&glock);
 	STAILQ_FOREACH(np, &user_st_list, entries) {
-		if (strcmp(np->usr->id, COSA_PREVIA_USR_ID) == 0) {
-			sprintf(np->usr->msgs, "%s\n %s : %s", np->usr->msgs, current_user->name, message);
+		if (strcmp(np->usr->id, to_id) == 0) {
+			sprintf(np->usr->msgs, "%s\n %s : %s", np->usr->msgs, current_user->name, msg);
 		}
 	}
 	gdk_threads_add_idle(refresh_chat, NULL);
@@ -369,7 +395,6 @@ static void handle_action(struct json_object *action_j, struct json_object *req)
 {
 	const char *action = json_object_get_string(action_j);
 	if (strcmp(action, "USER_CONNECTED") == 0) {
-		printf("entro");
 		handle_user_connected(req);
 	}
 
@@ -383,6 +408,33 @@ static void handle_action(struct json_object *action_j, struct json_object *req)
 
 	if (strcmp(action, "RECEIVE_MESSAGE") == 0) {
 		handle_receive_message(req);
+	}
+}
+
+
+
+static void handle_status(struct json_object *stat_prop, struct json_object *res)
+{
+	struct json_object *action_j, *status_j;
+	const char *s_stat = json_object_get_string(stat_prop);
+	json_bool error = 0;
+	if (strcmp(s_stat, "OK") == 0) {
+		test_set_prop(&error, previous_action, "action", &action_j);
+		test_set_prop(&error, previous_action, "status", &status_j);
+		if (error) {
+			previous_action = NULL;
+			return;
+		}
+		const char *action = json_object_get_string(action_j);
+		const char *new_stat = json_object_get_string(status_j);
+		if (strcmp(action, "CHANGE_STATUS") == 0) {
+			gdk_threads_add_idle(update_gui_status, &new_stat);
+		} else if (strcmp(action, "SEND_MESSAGE") == 0) {
+
+		}
+	} else {
+		previous_action = NULL;
+		return;
 	}
 }
 
@@ -458,25 +510,35 @@ static void *socket_connect(void *data)
 	// Fetch users
 	fetch_users(userid);
 	int rdbytes;
-	struct json_object *req, *action_prop;
+	struct json_object *req, *action_prop, *stat_prop;
 	while (1) {
-		rdbytes= read(sfd, msg_buffer, BUFFER_SIZE);
+		rdbytes = read(sfd, msg_buffer, BUFFER_SIZE);
 		if (rdbytes == 0) {
 			show_error("Server disconnected\n");
 			close(sfd);
 			return NULL;
 		}
 		req = json_tokener_parse(msg_buffer);
-		test_set_prop(&error, req, "action", &action_prop);
+		printf("REQ %s\n", msg_buffer);
+		test_set_prop(&error, req, "status", &stat_prop);
 		if (error) {
-			show_error("Error checking for action\n");
+			error = 0;
+			test_set_prop(&error, req, "action", &action_prop);
+			if (error) {
+				show_error("Error checking for action\n");
+			} else {
+				handle_action(action_prop, req);
+			}
 		} else {
-			handle_action(action_prop, req);
+			handle_status(stat_prop, req);
 		}
+		
 	}
 	free(conn);
 	return NULL;
 }
+
+
 
 
 static void *request_user_status_change(void *nstat)
@@ -503,19 +565,7 @@ static void *request_user_status_change(void *nstat)
 		return NULL;
 	}
 	// Wait for the ok
-	rdbytes = read(sfd, msg_buffer, BUFFER_SIZE);
-	if (rdbytes == -1) {
-		show_error("Error reading from server\n");
-		return NULL;
-	}
-	ok_j = json_tokener_parse(msg_buffer);
-	json_object_object_get_ex(ok_j, "status", &status_j);
-	const char *status = json_object_get_string(status_j);
-	if (strcmp(status, "OK") == 0) {
-
-	} else {
-		show_error("Server error");
-	}
+	previous_action = req_j;
 	pthread_mutex_unlock(&socket_lock);
 	return NULL;
 }
@@ -555,12 +605,8 @@ static void connect_to_server(GtkButton *button, gpointer user_data)
 
 static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer user_data)
 {
-	if (!logged_in) {
-		// Show chat interface
-		gtk_stack_set_visible_child_name(GTK_STACK(chat_stack), "chat-box");
-		logged_in = TRUE;
-	}
 	gint index = gtk_list_box_row_get_index(row);
+	printf("INDEX %d\n", index);
 	pthread_mutex_lock(&glock);
 	current_selected_user = find_user_by_index(index);
 	pthread_mutex_unlock(&glock);
@@ -571,6 +617,7 @@ static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer use
 static void *request_send_message(void *msg_v) 
 {
 	struct json_object *action_j, *from_j, *to_j, *msg_j, *req_j;
+	json_bool error;
 	req_j = json_object_new_object();
 	action_j = json_object_new_string("SEND_MESSAGE");	
 	from_j = json_object_new_string(current_user->id);
