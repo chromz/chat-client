@@ -191,6 +191,7 @@ static void fetch_users(const char *userid)
 		handle_error("Error reading users");
 		return;
 	}
+	printf("SERVER RESP %s\n", msg_buffer);
 	server_resp = json_tokener_parse(msg_buffer);
 	if (!json_object_object_get_ex(server_resp, "users", &user_list_json)) {
 		return;
@@ -626,9 +627,12 @@ static void connect_to_server(GtkButton *button, gpointer user_data)
 static void on_user_item_click(GtkListBox *box, GtkListBoxRow *row, gpointer user_data)
 {
 	gint index = gtk_list_box_row_get_index(row);
-	printf("INDEX %d\n", index);
 	pthread_mutex_lock(&glock);
 	current_selected_user = find_user_by_index(index);
+	GtkTextBuffer *buffer = gtk_text_buffer_new(NULL);
+	gtk_text_buffer_set_text(buffer, current_selected_user->msgs,
+				strlen(current_selected_user->msgs));
+	gtk_text_view_set_buffer(GTK_TEXT_VIEW(chat_text), buffer);
 	pthread_mutex_unlock(&glock);
 	gtk_header_bar_set_title(GTK_HEADER_BAR(header_bar), current_selected_user->name);
 	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), current_selected_user->status);
