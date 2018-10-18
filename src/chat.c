@@ -204,14 +204,7 @@ static void fetch_users(const char *userid)
 		json_object_object_get_ex(user_obj, "name", &user_name_j);
 		json_object_object_get_ex(user_obj, "status", &user_status_j);
 		const char *id = json_object_get_string(user_id_j);
-		
-		if (strcmp(userid, id) == 0) {
-			struct user_st *usr = malloc(sizeof(struct user_st));
-			usr->id = id;
-			usr->name = json_object_get_string(user_name_j);
-			usr->status = json_object_get_string(user_status_j);
-			current_user = usr;
-		} else {
+		if (strcmp(userid, id) != 0) {
 			struct usr_entry *new_usr = malloc(sizeof(struct usr_entry)); 
 			new_usr->usr = malloc(sizeof(struct user_st));
 			new_usr->usr->id = id;
@@ -362,6 +355,7 @@ static void handle_receive_message(struct json_object *req)
 	}
 	const char *from_id = json_object_get_string(from_j);
 	const char *msg = json_object_get_string(message_j);
+	printf("RECEIVE MESSAGE FROM %s WITH %s\n", from_id, msg);
 	pthread_mutex_lock(&glock);
 	STAILQ_FOREACH(np, &user_st_list, entries) {
 		if (strcmp(np->usr->id, from_id) == 0) {
@@ -495,6 +489,24 @@ static void *socket_connect(void *data)
 	json_object_object_get_ex(ok_j, "status", &status_j);
 	const char *status = json_object_get_string(status_j);
 	if (strcmp(status, "OK") == 0) {
+		struct json_object *usr_j, *id_j, *name_j, *status_j;
+		json_bool error = 0;
+		test_set_prop(&error, ok_j, "user", &usr_j);
+		if (error) {
+			handle_error("Invalid server response");
+			return NULL;
+		}
+		test_set_prop(&error, usr_j, "id", &id_j);
+		test_set_prop(&error, usr_j, "name", &name_j);
+		test_set_prop(&error, usr_j, "status", &status_j);
+		if (error) {
+			handle_error("Invalid Server response");
+			return NULL;
+		}
+		current_user = malloc(sizeof(struct user_st));
+		current_user->id = json_object_get_string(id_j);;
+		current_user->name = json_object_get_string(name_j);
+		current_user->status = json_object_get_string(status_j);
 		gdk_threads_add_idle(login_user, NULL);
 	}
 	json_bool error;
