@@ -53,6 +53,7 @@ static GtkWidget *form_box;
 static GtkWidget *send_msg_button;
 static GtkWidget *msg_input;
 static GdkPixbuf *uvg_logo;
+static GtkWidget *scroll;
 
 // Login components
 static GtkWidget *spinner;
@@ -758,12 +759,14 @@ static void activate(GtkApplication *app, gpointer user_data)
 	chat_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10); 
 	form_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	chat_text = gtk_text_view_new();
+	scroll = gtk_scrolled_window_new(NULL, NULL);
 	msg_input = gtk_entry_new();
 	send_msg_button = gtk_button_new_with_label("Send");
 
 	// Add chat textbox
 	gtk_text_view_set_editable(GTK_TEXT_VIEW(chat_text), FALSE);
-	gtk_box_pack_start(GTK_BOX(chat_box), chat_text, TRUE, TRUE, 0);
+	gtk_container_add(GTK_CONTAINER(scroll), chat_text);
+	gtk_box_pack_start(GTK_BOX(chat_box), scroll, TRUE, TRUE, 0);
 
 	// Prepare send message form
 	gtk_box_pack_start(GTK_BOX(form_box), msg_input, TRUE, TRUE, 0);
