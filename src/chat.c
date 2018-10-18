@@ -25,6 +25,11 @@ struct user_st {
 	GtkWidget *label;
 };
 
+struct pass_info {
+	const char *id;
+	const char *new_status;
+};
+
 struct usr_entry {
 	struct user_st *usr;
 	STAILQ_ENTRY(usr_entry) entries;
@@ -268,6 +273,19 @@ static gboolean update_gui_status(void *new_stat_v)
 	return FALSE;
 }
 
+static gboolean update_gui_status_usr(void *new)
+{
+	struct pass_info *info = (struct pass_info *) new;
+	if (current_selected_user != NULL){
+		if (strcmp(current_selected_user->id, info->id) == 0) {
+			gtk_header_bar_set_subtitle(GTK_HEADER_BAR(header_bar), info->new_status);
+		}
+	} 
+
+	free(info);
+	return FALSE;
+}
+
 static void change_user_status(const char *id, const char *new_status)
 {
 	struct usr_entry *np;
@@ -275,8 +293,11 @@ static void change_user_status(const char *id, const char *new_status)
 	STAILQ_FOREACH(np, &user_st_list, entries) {
 		if (strcmp(np->usr->id, id) == 0) {
 			// Change user status on
+			struct pass_info *info = malloc(sizeof(struct pass_info));
 			np->usr->status = new_status;
-			gdk_threads_add_idle(update_gui_status, &new_status);
+			info->new_status = new_status;
+			info->id = np->usr->id;
+			gdk_threads_add_idle(update_gui_status_usr, info);
 			break;
 		}
 	}
