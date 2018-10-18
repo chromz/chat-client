@@ -339,9 +339,13 @@ static void handle_user_disconnected(struct json_object *req)
 
 static gboolean refresh_chat(void *data)
 {
-	GtkTextBuffer *buffer = gtk_text_buffer_new(NULL);
-	gtk_text_buffer_set_text(buffer, current_selected_user->msgs, strlen(current_selected_user->msgs));
-	gtk_text_view_set_buffer(GTK_TEXT_VIEW(chat_text), buffer);
+	if (current_selected_user != NULL){
+		GtkTextBuffer *buffer = gtk_text_buffer_new(NULL);
+		gtk_text_buffer_set_text(buffer, current_selected_user->msgs,
+				strlen(current_selected_user->msgs));
+		gtk_text_view_set_buffer(GTK_TEXT_VIEW(chat_text), buffer);
+	}
+	
 	return FALSE;
 }
 
@@ -361,14 +365,14 @@ static void handle_receive_message(struct json_object *req)
 	pthread_mutex_lock(&glock);
 	STAILQ_FOREACH(np, &user_st_list, entries) {
 		if (strcmp(np->usr->id, from_id) == 0) {
-			sprintf(np->usr->msgs, "%s\n %s : %s", np->usr->msgs, from_id, msg);
+			sprintf(np->usr->msgs, "%s\n (%s) : %s", np->usr->msgs, np->usr->name, msg);
 		}
 	}
 	gdk_threads_add_idle(refresh_chat, NULL);
 	pthread_mutex_unlock(&glock);
 }
 
-static void handle_send_message()
+static void handle_send_message(void)
 {
 	struct usr_entry *np;
 	struct json_object *message_j, *to_j;
@@ -383,7 +387,9 @@ static void handle_send_message()
 	const char *msg = json_object_get_string(message_j);
 	pthread_mutex_lock(&glock);
 	STAILQ_FOREACH(np, &user_st_list, entries) {
+		printf("JUPUTA\n");
 		if (strcmp(np->usr->id, to_id) == 0) {
+			printf("ENTRE\n");
 			sprintf(np->usr->msgs, "%s\n %s : %s", np->usr->msgs, current_user->name, msg);
 		}
 	}
